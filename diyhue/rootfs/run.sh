@@ -12,6 +12,7 @@ export IP="$(bashio::config 'ip')"
 
 
 export NO_SERVE_HTTPS="$(bashio::config 'no_serve_https')"
+export NO_LINK_BUTTON="$(bashio::config 'no_link_button')"
 
 if [[ -d $CONFIG_PATH ]]; then
     echo "$CONFIG_PATH exists."
@@ -25,8 +26,16 @@ echo "Your Architecture is $BUILD_ARCHI"
 
 if [ "$NO_SERVE_HTTPS" = "true" ] ; then
     echo "No serve HTTPS"
-    python3 -u /opt/hue-emulator/HueEmulator3.py --docker --no-serve-https --ip "$IP"
+    if [ "$NO_LINK_BUTTON" = "true" ] ; then
+        python3 -u /opt/hue-emulator/HueEmulator3.py --docker --no-link-button --no-serve-https --ip "$IP"
+    else
+        python3 -u /opt/hue-emulator/HueEmulator3.py --docker --no-serve-https --ip "$IP"
+    fi
 else
     echo "Serve HTTPS"
-    python3 -u /opt/hue-emulator/HueEmulator3.py --docker --ip "$IP"
+    if [ "$NO_LINK_BUTTON" = "true" ] ; then
+        python3 -u /opt/hue-emulator/HueEmulator3.py --docker --no-link-button --ip "$IP"
+    else
+        python3 -u /opt/hue-emulator/HueEmulator3.py --docker --ip "$IP"
+    fi
 fi

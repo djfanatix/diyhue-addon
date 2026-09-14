@@ -31,6 +31,7 @@ RUN curl -sL -o diyhue.zip https://github.com/diyhue/diyHue/archive/${DIYHUE_COM
 RUN unzip -qo diyhue.zip
 RUN rm diyhue.zip
 RUN pip3 install -r /diyHue-${DIYHUE_COMMIT}/requirements.txt --no-cache-dir --break-system-packages --ignore-installed
+RUN pip3 install --no-cache-dir --break-system-packages xled
 
 # Install diyHue
 RUN cp -r /diyHue-${DIYHUE_COMMIT}/BridgeEmulator/flaskUI /opt/hue-emulator/
@@ -67,6 +68,10 @@ WORKDIR /opt/hue-emulator
 
 # Copy additional local build files
 COPY rootfs ./
+
+# Include the Twinkly realtime bridge helper used for per-LED updates.
+COPY rootfs/twinkly_rt_bridge.py /opt/hue-emulator/twinkly_rt_bridge.py
+RUN python3 /opt/hue-emulator/apply_twinkly_patch.py && rm /opt/hue-emulator/apply_twinkly_patch.py /opt/hue-emulator/twinkly.py
 
 # Modify user rights of additional files
 RUN chmod +x ./select.sh ./genCert.sh && chmod a+x ./run.sh

@@ -59,6 +59,18 @@ You have to set this value to true if you are running hassio under https. Hassio
 
 Valid values: `false`, `true`.
 
+### Option: `no_link_button`
+
+When enabled, Hue app pairing does not require the diyHue link-button timer.
+This is useful for the Home Assistant add-on because the mobile app can take
+longer than 30 seconds to complete bridge registration.
+
+### Twinkly
+
+Twinkly controllers are discovered through the `/xled/v1/gestalt` endpoint and
+are exposed as one Hue light per physical LED. Add the controller IP manually
+from the diyHue UI if automatic network scanning does not find it.
+
 
 ## Sidepanel Link
 
