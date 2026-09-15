@@ -27,6 +27,14 @@ _MODE_REASSERT_INTERVAL = 5.0
 # without spamming it every single tick.
 _HEARTBEAT_LOG_INTERVAL = 30.0
 
+# Last known full-brightness color per light, independent of light.state.
+# During entertainment streaming diyHue calls set_light() directly with
+# per-frame deltas without necessarily updating light.state, so relying on
+# light.state alone caused color to collapse to a stale/neutral value as soon
+# as a frame omitted explicit color info.
+_last_base_rgb = {}
+_last_base_rgb_lock = threading.Lock()
+
 
 def _hsv_to_rgb(hue, sat, bri):
     h = (max(0, min(65535, int(hue))) / 65535.0) * 360.0
@@ -57,20 +65,29 @@ def _coerce_rgb(data, light):
     ct = data.get("ct", state.get("ct"))
     hue = data.get("hue", state.get("hue"))
     sat = data.get("sat", state.get("sat"))
+    key = light.id_v1
+
     if xy:
-        rgb = convert_xy(xy[0], xy[1], bri)
+        base = convert_xy(xy[0], xy[1], 255)
     elif ct:
-        ct = max(153, min(500, int(ct)))
-        ratio = (ct - 153) / 347.0
-        rgb = [255, int(175 + ratio * 80), int(72 + ratio * 183)]
+        ct_val = max(153, min(500, int(ct)))
+        ratio = (ct_val - 153) / 347.0
+        base = [255, int(175 + ratio * 80), int(72 + ratio * 183)]
     elif hue is not None and sat is not None:
-        rgb = _hsv_to_rgb(hue, sat, bri)
+        base = _hsv_to_rgb(hue, sat, 255)
     else:
-        # No color info anywhere (incoming command or prior state) - only
-        # then fall back to white, matching a never-configured light.
-        rgb = [255, 255, 255]
-    if bri < 255:
-        rgb = [int(value * bri / 255.0) for value in rgb]
+        with _last_base_rgb_lock:
+            base = _last_base_rgb.get(key)
+        if base is None:
+            # No color info anywhere (incoming command, light.state, or our
+            # own cache) - only then fall back to white, matching a
+            # never-configured light.
+            base = [255, 255, 255]
+
+    with _last_base_rgb_lock:
+        _last_base_rgb[key] = base
+
+    rgb = [int(value * bri / 255.0) for value in base] if bri < 255 else list(base)
     return [max(0, min(255, int(value))) for value in rgb]
 
 
