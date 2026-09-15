@@ -20,6 +20,12 @@ _buffers_lock = threading.Lock()
 # pattern) if it stops receiving UDP frames for a while. Resend the last known
 # frame on this interval so quiet/unchanged channels don't cause a drop-out.
 _HEARTBEAT_INTERVAL = 1.0
+# Some Twinkly firmwares appear to expire the "realtime mode" flag separately
+# from the frame data itself. Re-assert the mode on this (coarser) interval.
+_MODE_REASSERT_INTERVAL = 5.0
+# Log a heartbeat-alive line at this interval so it's visible in the log
+# without spamming it every single tick.
+_HEARTBEAT_LOG_INTERVAL = 30.0
 
 
 def _hsv_to_rgb(hue, sat, bri):
@@ -90,8 +96,20 @@ def _send_frame_locked(bridge, host, led_total):
 
 
 def _heartbeat_loop(host, led_total, bridge):
+    elapsed = 0.0
+    since_log = 0.0
     while True:
         time.sleep(_HEARTBEAT_INTERVAL)
+        elapsed += _HEARTBEAT_INTERVAL
+        since_log += _HEARTBEAT_INTERVAL
+
+        if elapsed >= _MODE_REASSERT_INTERVAL:
+            elapsed = 0.0
+            try:
+                bridge["device"].set_mode("rt")
+            except Exception:
+                logging.exception("Failed to re-assert realtime mode on Twinkly device %s", host)
+
         try:
             with bridge["lock"]:
                 _send_frame_locked(bridge, host, led_total)
@@ -99,6 +117,10 @@ def _heartbeat_loop(host, led_total, bridge):
             # Already logged in _send_frame_locked; keep the heartbeat alive
             # so a transient failure doesn't permanently stop the refresh.
             pass
+
+        if since_log >= _HEARTBEAT_LOG_INTERVAL:
+            since_log = 0.0
+            logging.info("Twinkly device %s: heartbeat alive", host)
 
 
 def _ensure_device(host, led_total):
