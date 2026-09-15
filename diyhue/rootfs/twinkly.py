@@ -75,13 +75,19 @@ def _segment_range_for_index(led_total, segment_index):
 
 def _ensure_device(host, led_total):
     if HighControlInterface is None:
+        logging.error("Cannot control Twinkly device %s: the 'xled' package is not installed", host)
         raise RuntimeError("xled is not installed")
     device_host = host.rsplit(":", 1)[0] if host.count(":") == 1 else host
     key = (host, led_total)
     with _buffers_lock:
         if key not in _buffers:
-            device = HighControlInterface(device_host)
-            device.set_mode("rt")
+            try:
+                device = HighControlInterface(device_host)
+                device.set_mode("rt")
+            except Exception:
+                logging.exception("Failed to connect to Twinkly device %s (led_total=%s)", device_host, led_total)
+                raise
+            logging.info("Twinkly device %s switched to realtime mode (led_total=%s)", device_host, led_total)
             _buffers[key] = {"device": device, "pixels": bytearray(led_total * 3), "lock": threading.Lock()}
         return _buffers[key]
 
@@ -92,16 +98,35 @@ def _paint_segment(host, led_total, segment_index, rgb):
         offset = segment_index * 3
         bridge["pixels"][offset:offset + 3] = bytes(rgb)
         frame = bytes(bridge["pixels"])
-    bridge["device"].set_rt_frame_socket(io.BytesIO(frame), version=3, leds_number=led_total)
+    try:
+        bridge["device"].set_rt_frame_socket(io.BytesIO(frame), version=3, leds_number=led_total)
+    except Exception:
+        logging.exception(
+            "Failed to send realtime frame to Twinkly device %s (segment=%s, rgb=%s)",
+            host, segment_index, rgb,
+        )
+        raise
+    logging.debug("Twinkly device %s: segment %s set to rgb=%s", host, segment_index, rgb)
 
 
 def set_light(light, data):
-    if "lights" in data and isinstance(data["lights"], dict):
-        data = data["lights"].get(str(light.id_v1), data["lights"])
-    rgb = _coerce_rgb(data, light)
-    if data.get("on") is False:
-        rgb = [0, 0, 0]
-    _paint_segment(light.protocol_cfg["ip"], int(light.protocol_cfg["led_total"]), int(light.protocol_cfg["segment_index"]), rgb)
+    try:
+        if "lights" in data and isinstance(data["lights"], dict):
+            data = data["lights"].get(str(light.id_v1), data["lights"])
+        rgb = _coerce_rgb(data, light)
+        if data.get("on") is False:
+            rgb = [0, 0, 0]
+        ip = light.protocol_cfg["ip"]
+        led_total = int(light.protocol_cfg["led_total"])
+        segment_index = int(light.protocol_cfg["segment_index"])
+        logging.info(
+            "Twinkly set_light for light id_v1=%s ip=%s segment=%s data=%s -> rgb=%s",
+            light.id_v1, ip, segment_index, data, rgb,
+        )
+        _paint_segment(ip, led_total, segment_index, rgb)
+    except Exception:
+        logging.exception("Twinkly set_light failed for light id_v1=%s data=%s", getattr(light, "id_v1", "?"), data)
+        return {"status": "error"}
     return {"status": "ok"}
 
 
