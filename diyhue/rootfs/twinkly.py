@@ -3,6 +3,7 @@ import json
 import logManager
 import requests
 import threading
+import time
 
 from functions.colors import convert_xy
 
@@ -14,6 +15,11 @@ except Exception:  # pragma: no cover
 logging = logManager.logger.get_logger(__name__)
 _buffers = {}
 _buffers_lock = threading.Lock()
+
+# Twinkly's realtime mode reverts to its own effect (e.g. a plain white idle
+# pattern) if it stops receiving UDP frames for a while. Resend the last known
+# frame on this interval so quiet/unchanged channels don't cause a drop-out.
+_HEARTBEAT_INTERVAL = 1.0
 
 
 def _hsv_to_rgb(hue, sat, bri):
@@ -73,6 +79,28 @@ def _segment_range_for_index(led_total, segment_index):
     return segment_index, segment_index
 
 
+def _send_frame_locked(bridge, host, led_total):
+    """Send the current pixel buffer. Caller must hold bridge['lock']."""
+    frame = bytes(bridge["pixels"])
+    try:
+        bridge["device"].set_rt_frame_socket(io.BytesIO(frame), version=3, leds_number=led_total)
+    except Exception:
+        logging.exception("Failed to send realtime frame to Twinkly device %s", host)
+        raise
+
+
+def _heartbeat_loop(host, led_total, bridge):
+    while True:
+        time.sleep(_HEARTBEAT_INTERVAL)
+        try:
+            with bridge["lock"]:
+                _send_frame_locked(bridge, host, led_total)
+        except Exception:
+            # Already logged in _send_frame_locked; keep the heartbeat alive
+            # so a transient failure doesn't permanently stop the refresh.
+            pass
+
+
 def _ensure_device(host, led_total):
     if HighControlInterface is None:
         logging.error("Cannot control Twinkly device %s: the 'xled' package is not installed", host)
@@ -88,7 +116,12 @@ def _ensure_device(host, led_total):
                 logging.exception("Failed to connect to Twinkly device %s (led_total=%s)", device_host, led_total)
                 raise
             logging.info("Twinkly device %s switched to realtime mode (led_total=%s)", device_host, led_total)
-            _buffers[key] = {"device": device, "pixels": bytearray(led_total * 3), "lock": threading.Lock()}
+            bridge = {"device": device, "pixels": bytearray(led_total * 3), "lock": threading.Lock()}
+            _buffers[key] = bridge
+            threading.Thread(
+                target=_heartbeat_loop, args=(host, led_total, bridge), daemon=True,
+            ).start()
+            logging.info("Twinkly device %s: started heartbeat thread (interval=%.1fs)", host, _HEARTBEAT_INTERVAL)
         return _buffers[key]
 
 
@@ -97,15 +130,7 @@ def _paint_segment(host, led_total, segment_index, rgb):
     with bridge["lock"]:
         offset = segment_index * 3
         bridge["pixels"][offset:offset + 3] = bytes(rgb)
-        frame = bytes(bridge["pixels"])
-    try:
-        bridge["device"].set_rt_frame_socket(io.BytesIO(frame), version=3, leds_number=led_total)
-    except Exception:
-        logging.exception(
-            "Failed to send realtime frame to Twinkly device %s (segment=%s, rgb=%s)",
-            host, segment_index, rgb,
-        )
-        raise
+        _send_frame_locked(bridge, host, led_total)
     logging.debug("Twinkly device %s: segment %s set to rgb=%s", host, segment_index, rgb)
 
 
