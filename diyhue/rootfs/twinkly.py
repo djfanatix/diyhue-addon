@@ -51,16 +51,23 @@ def _hsv_to_rgb(hue, sat, bri):
 
 
 def _coerce_rgb(data, light):
-    bri = int(data.get("bri", light.state.get("bri", 255)))
-    if "xy" in data:
-        rgb = convert_xy(data["xy"][0], data["xy"][1], bri)
-    elif "ct" in data:
-        ct = max(153, min(500, int(data["ct"])))
+    state = light.state
+    bri = int(data.get("bri", state.get("bri", 255)))
+    xy = data.get("xy", state.get("xy"))
+    ct = data.get("ct", state.get("ct"))
+    hue = data.get("hue", state.get("hue"))
+    sat = data.get("sat", state.get("sat"))
+    if xy:
+        rgb = convert_xy(xy[0], xy[1], bri)
+    elif ct:
+        ct = max(153, min(500, int(ct)))
         ratio = (ct - 153) / 347.0
         rgb = [255, int(175 + ratio * 80), int(72 + ratio * 183)]
-    elif "hue" in data and "sat" in data:
-        rgb = _hsv_to_rgb(data["hue"], data["sat"], bri)
+    elif hue is not None and sat is not None:
+        rgb = _hsv_to_rgb(hue, sat, bri)
     else:
+        # No color info anywhere (incoming command or prior state) - only
+        # then fall back to white, matching a never-configured light.
         rgb = [255, 255, 255]
     if bri < 255:
         rgb = [int(value * bri / 255.0) for value in rgb]
